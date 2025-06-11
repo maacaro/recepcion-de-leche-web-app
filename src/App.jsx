@@ -25,13 +25,26 @@ const CheeseFactoryApp = () => {
   });
   const [showRatesEditor, setShowRatesEditor] = useState(false);
   const [formData, setFormData] = useState({
-    productor: "",
+    productorId: "",
+    productorNombre: "",
     tipo: "fria",
     origen: "vaca",
     cantidad: "",
     fecha: new Date().toISOString().split("T")[0],
   });
   const [debugInfo, setDebugInfo] = useState("");
+
+  // Estados para gestión de productores
+  const [producers, setProducers] = useState([]);
+  const [showProducerSuggestions, setShowProducerSuggestions] = useState(false);
+  const [filteredProducers, setFilteredProducers] = useState([]);
+  const [showNewProducerForm, setShowNewProducerForm] = useState(false);
+  const [newProducerData, setNewProducerData] = useState({
+    nombre: "",
+    rif: "",
+    correo: "",
+    telefono: "",
+  });
 
   function getStartOfWeek(date) {
     const d = new Date(date);
@@ -70,7 +83,8 @@ const CheeseFactoryApp = () => {
     const exampleData = [
       {
         id: 1,
-        productor: "Granja López",
+        productorId: "prod-1",
+        productorNombre: "Granja López",
         tipo: "fria",
         origen: "vaca",
         cantidad: 150,
@@ -79,7 +93,8 @@ const CheeseFactoryApp = () => {
       },
       {
         id: 2,
-        productor: "Finca Rodríguez",
+        productorId: "prod-2",
+        productorNombre: "Finca Rodríguez",
         tipo: "caliente",
         origen: "bufala",
         cantidad: 85,
@@ -88,6 +103,40 @@ const CheeseFactoryApp = () => {
       },
     ];
     setDeliveries(exampleData);
+
+    // Inicializar productores con datos completos
+    const exampleProducers = [
+      {
+        id: "prod-1",
+        nombre: "Granja López",
+        rif: "J-12345678-9",
+        correo: "granja.lopez@email.com",
+        telefono: "0412-1234567",
+      },
+      {
+        id: "prod-2",
+        nombre: "Finca Rodríguez",
+        rif: "J-87654321-0",
+        correo: "finca.rodriguez@email.com",
+        telefono: "0424-7654321",
+      },
+      {
+        id: "prod-3",
+        nombre: "Granja López",
+        rif: "J-11111111-1",
+        correo: "otra.granja.lopez@email.com",
+        telefono: "0416-1111111",
+      },
+      {
+        id: "prod-4",
+        nombre: "Establo San Miguel",
+        rif: "J-22222222-2",
+        correo: "sanmiguel@email.com",
+        telefono: "0426-2222222",
+      },
+    ];
+    setProducers(exampleProducers);
+
     setDebugInfo(
       "Sistema inicializado con " + exampleData.length + " entregas"
     );
@@ -117,8 +166,8 @@ const CheeseFactoryApp = () => {
   const handleSubmit = () => {
     setDebugInfo("Procesando nueva entrega...");
 
-    if (!formData.productor.trim()) {
-      alert("Por favor, ingrese el nombre del productor");
+    if (!formData.productorId) {
+      alert("Por favor, seleccione un productor válido");
       return;
     }
 
@@ -129,7 +178,8 @@ const CheeseFactoryApp = () => {
 
     const newDelivery = {
       id: Date.now() + Math.random(),
-      productor: formData.productor.trim(),
+      productorId: formData.productorId,
+      productorNombre: formData.productorNombre,
       tipo: formData.tipo,
       origen: formData.origen,
       cantidad: parseFloat(formData.cantidad),
@@ -144,7 +194,8 @@ const CheeseFactoryApp = () => {
     });
 
     setFormData({
-      productor: "",
+      productorId: "",
+      productorNombre: "",
       tipo: "fria",
       origen: "vaca",
       cantidad: "",
@@ -152,11 +203,12 @@ const CheeseFactoryApp = () => {
     });
 
     setShowForm(false);
+    setShowProducerSuggestions(false);
     alert(
       "Entrega registrada: " +
         newDelivery.cantidad +
         "L de " +
-        newDelivery.productor
+        newDelivery.productorNombre
     );
   };
 
@@ -223,6 +275,81 @@ const CheeseFactoryApp = () => {
       ...prev,
       [field]: value,
     }));
+
+    // Autocompletado para productor
+    if (field === "productorNombre") {
+      if (value.trim() === "") {
+        setShowProducerSuggestions(false);
+        setFilteredProducers([]);
+      } else {
+        const filtered = producers.filter(
+          (producer) =>
+            producer.nombre.toLowerCase().includes(value.toLowerCase()) ||
+            producer.rif.toLowerCase().includes(value.toLowerCase())
+        );
+        setFilteredProducers(filtered);
+        setShowProducerSuggestions(filtered.length > 0);
+      }
+    }
+  };
+
+  const selectProducer = (producer) => {
+    setFormData((prev) => ({
+      ...prev,
+      productorId: producer.id,
+      productorNombre: producer.nombre,
+    }));
+    setShowProducerSuggestions(false);
+    setFilteredProducers([]);
+  };
+
+  const handleNewProducerSubmit = () => {
+    if (!newProducerData.nombre.trim() || !newProducerData.rif.trim()) {
+      alert("Por favor, complete al menos el nombre y RIF del productor");
+      return;
+    }
+
+    // Verificar que el RIF no exista
+    const existingProducer = producers.find(
+      (p) => p.rif === newProducerData.rif
+    );
+    if (existingProducer) {
+      alert("Ya existe un productor con este RIF: " + existingProducer.nombre);
+      return;
+    }
+
+    const newProducer = {
+      id: "prod-" + Date.now(),
+      nombre: newProducerData.nombre.trim(),
+      rif: newProducerData.rif.trim(),
+      correo: newProducerData.correo.trim(),
+      telefono: newProducerData.telefono.trim(),
+    };
+
+    setProducers((prev) =>
+      [...prev, newProducer].sort((a, b) => a.nombre.localeCompare(b.nombre))
+    );
+
+    // Seleccionar automáticamente el nuevo productor
+    setFormData((prev) => ({
+      ...prev,
+      productorId: newProducer.id,
+      productorNombre: newProducer.nombre,
+    }));
+
+    // Resetear formulario de nuevo productor
+    setNewProducerData({
+      nombre: "",
+      rif: "",
+      correo: "",
+      telefono: "",
+    });
+
+    // Cerrar modal de productor y volver al modal de entrega
+    setShowNewProducerForm(false);
+    setShowForm(true);
+
+    alert("Productor registrado correctamente: " + newProducer.nombre);
   };
 
   const handleWeeklyRateChange = (field, value) => {
@@ -252,7 +379,7 @@ const CheeseFactoryApp = () => {
         (filter.origen === "" || delivery.origen === filter.origen) &&
         (filter.fecha === "" || delivery.fecha === filter.fecha) &&
         (filter.productor === "" ||
-          delivery.productor
+          delivery.productorNombre
             .toLowerCase()
             .includes(filter.productor.toLowerCase()))
       );
@@ -281,10 +408,11 @@ const CheeseFactoryApp = () => {
     const producerTotals = {};
 
     weeklyDeliveries.forEach((delivery) => {
-      const key = delivery.productor;
+      const key = delivery.productorId;
       if (!producerTotals[key]) {
         producerTotals[key] = {
-          productor: delivery.productor,
+          productorId: delivery.productorId,
+          productorNombre: delivery.productorNombre,
           vaca_fria: 0,
           vaca_caliente: 0,
           bufala_fria: 0,
@@ -538,7 +666,7 @@ const CheeseFactoryApp = () => {
                           {new Date(delivery.fecha).toLocaleDateString("es-ES")}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {delivery.productor}
+                          {delivery.productorNombre}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
@@ -624,7 +752,7 @@ const CheeseFactoryApp = () => {
                         {new Date(delivery.fecha).toLocaleDateString("es-ES")}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {delivery.productor}
+                        {delivery.productorNombre}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
@@ -692,7 +820,7 @@ const CheeseFactoryApp = () => {
                         {new Date(delivery.fecha).toLocaleDateString("es-ES")}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {delivery.productor}
+                        {delivery.productorNombre}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
@@ -994,7 +1122,7 @@ const CheeseFactoryApp = () => {
                     {calculateWeeklyPayments().map((payment, index) => (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {payment.productor}
+                          {payment.productorNombre}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {payment.vaca_fria.toLocaleString("es-ES")}
@@ -1227,30 +1355,239 @@ const CheeseFactoryApp = () => {
         </div>
       )}
 
-      {showForm && (
+      {/* Modal para Nuevo Productor */}
+      {showNewProducerForm && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <div className="relative top-20 mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
             <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">
-                Nueva Entrega de Leche
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Registrar Nuevo Productor
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowNewProducerForm(false);
+                    setShowForm(true);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    <User className="w-4 h-4 inline mr-1" />
-                    Productor
+                    Nombre Completo *
                   </label>
                   <input
                     type="text"
                     required
-                    value={formData.productor}
+                    value={newProducerData.nombre}
                     onChange={(e) =>
-                      handleInputChange("productor", e.target.value)
+                      setNewProducerData({
+                        ...newProducerData,
+                        nombre: e.target.value,
+                      })
                     }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Nombre del productor"
+                    placeholder="Ej: Granja López C.A."
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    RIF *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newProducerData.rif}
+                    onChange={(e) =>
+                      setNewProducerData({
+                        ...newProducerData,
+                        rif: e.target.value,
+                      })
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Ej: J-12345678-9"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Correo Electrónico
+                  </label>
+                  <input
+                    type="email"
+                    value={newProducerData.correo}
+                    onChange={(e) =>
+                      setNewProducerData({
+                        ...newProducerData,
+                        correo: e.target.value,
+                      })
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="correo@ejemplo.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Teléfono
+                  </label>
+                  <input
+                    type="tel"
+                    value={newProducerData.telefono}
+                    onChange={(e) =>
+                      setNewProducerData({
+                        ...newProducerData,
+                        telefono: e.target.value,
+                      })
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0412-1234567"
+                  />
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-sm text-blue-800">
+                    <strong>Nota:</strong> El RIF debe ser único. Pueden existir
+                    varios productores con el mismo nombre pero diferentes RIF.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleNewProducerSubmit}
+                    className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
+                  >
+                    Registrar y Continuar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewProducerForm(false);
+                      setShowForm(true);
+                    }}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+                  >
+                    Volver
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal del Formulario de Entregas */}
+
+      {showForm && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Nueva Entrega de Leche
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowForm(false);
+                    setShowProducerSuggestions(false);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <User className="w-4 h-4 inline mr-1" />
+                    Productor
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        required
+                        value={formData.productorNombre}
+                        onChange={(e) =>
+                          handleInputChange("productorNombre", e.target.value)
+                        }
+                        onFocus={() => {
+                          if (formData.productorNombre.trim() !== "") {
+                            const filtered = producers.filter(
+                              (producer) =>
+                                producer.nombre
+                                  .toLowerCase()
+                                  .includes(
+                                    formData.productorNombre.toLowerCase()
+                                  ) ||
+                                producer.rif
+                                  .toLowerCase()
+                                  .includes(
+                                    formData.productorNombre.toLowerCase()
+                                  )
+                            );
+                            setFilteredProducers(filtered);
+                            setShowProducerSuggestions(filtered.length > 0);
+                          }
+                        }}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Escriba nombre o RIF del productor..."
+                        autoComplete="off"
+                      />
+
+                      {/* Lista de sugerencias */}
+                      {showProducerSuggestions &&
+                        filteredProducers.length > 0 && (
+                          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                            {filteredProducers.map((producer) => (
+                              <button
+                                key={producer.id}
+                                type="button"
+                                onClick={() => selectProducer(producer)}
+                                className="w-full text-left px-3 py-3 hover:bg-blue-50 hover:text-blue-700 focus:bg-blue-50 focus:text-blue-700 focus:outline-none border-b border-gray-100 last:border-b-0"
+                              >
+                                <div className="font-medium">
+                                  {producer.nombre}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  RIF: {producer.rif}
+                                  {producer.correo && " • " + producer.correo}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false);
+                        setShowNewProducerForm(true);
+                      }}
+                      className="bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
+                      title="Agregar nuevo productor"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Contador de productores */}
+                  <p className="text-xs text-gray-500 mt-1">
+                    {producers.length} productores registrados
+                    {formData.productorId && (
+                      <span className="ml-2 text-green-600">
+                        ✓ Seleccionado
+                      </span>
+                    )}
+                  </p>
                 </div>
 
                 <div>
@@ -1327,7 +1664,10 @@ const CheeseFactoryApp = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowForm(false)}
+                    onClick={() => {
+                      setShowForm(false);
+                      setShowProducerSuggestions(false);
+                    }}
                     className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
                   >
                     Cancelar
@@ -1368,13 +1708,11 @@ const CheeseFactoryApp = () => {
             <span>Productores activos:</span>
             <span className="font-medium">
               {
-                new Set(
-                  deliveries
-                    .filter(
-                      (d) => d.fecha === new Date().toISOString().split("T")[0]
-                    )
-                    .map((d) => d.productor)
-                ).size
+                deliveries
+                  .filter(
+                    (d) => d.fecha === new Date().toISOString().split("T")[0]
+                  )
+                  .map((d) => d.productorNombre).size
               }
             </span>
           </div>
