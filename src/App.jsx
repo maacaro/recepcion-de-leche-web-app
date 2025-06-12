@@ -58,13 +58,24 @@ const CheeseFactoryApp = () => {
   const [selectedWeek, setSelectedWeek] = useState(getStartOfWeek(new Date()));
   const [weeklyRates, setWeeklyRates] = useState([]);
   const [showWeeklyRatesForm, setShowWeeklyRatesForm] = useState(false);
+  const [showTariffAssignForm, setShowTariffAssignForm] = useState(false);
   const [weeklyRateForm, setWeeklyRateForm] = useState({
     fechaInicio: getStartOfWeek(new Date()).toISOString().split("T")[0],
+    nombre: "",
+    moneda: "USD",
     vaca_fria: "",
     vaca_caliente: "",
     bufala_fria: "",
     bufala_caliente: "",
     observaciones: "",
+  });
+
+  // Estado para asignación de tarifas a productores
+  const [tariffAssignments, setTariffAssignments] = useState([]);
+  const [assignmentForm, setAssignmentForm] = useState({
+    weekStart: getStartOfWeek(new Date()).toISOString().split("T")[0],
+    tariffId: "",
+    selectedProducers: [],
   });
 
   function formatWeekRange(startDate) {
@@ -142,25 +153,44 @@ const CheeseFactoryApp = () => {
     );
   }, []);
 
-  const getRateForDate = (fecha, tipo, origen) => {
+  const getRateForDate = (fecha, tipo, origen, productorId) => {
     const deliveryDate = new Date(fecha);
 
-    const weeklyRate = weeklyRates.find((rate) => {
-      const weekStart = new Date(rate.fechaInicio);
-      const weekEnd = new Date(rate.fechaInicio);
+    // Buscar asignación de tarifa para este productor en esta fecha
+    const assignment = tariffAssignments.find((assign) => {
+      const weekStart = new Date(assign.weekStart);
+      const weekEnd = new Date(assign.weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       weekEnd.setHours(23, 59, 59, 999);
 
-      return deliveryDate >= weekStart && deliveryDate <= weekEnd;
+      return (
+        deliveryDate >= weekStart &&
+        deliveryDate <= weekEnd &&
+        assign.selectedProducers.includes(productorId)
+      );
     });
 
-    if (weeklyRate) {
-      const key = origen + "_" + tipo;
-      return weeklyRate[key] || 0;
+    if (assignment) {
+      // Buscar la tarifa asignada
+      const weeklyRate = weeklyRates.find(
+        (rate) => rate.id === assignment.tariffId
+      );
+      if (weeklyRate) {
+        const key = origen + "_" + tipo;
+        return {
+          rate: weeklyRate[key] || 0,
+          currency: weeklyRate.moneda,
+          tariffName: weeklyRate.nombre,
+        };
+      }
     }
 
-    // Si no hay tarifa semanal, retorna 0
-    return 0;
+    // Si no hay tarifa asignada, retorna 0
+    return {
+      rate: 0,
+      currency: "USD",
+      tariffName: "Sin tarifa",
+    };
   };
 
   const handleSubmit = () => {
@@ -217,6 +247,8 @@ const CheeseFactoryApp = () => {
       (key) =>
         key !== "fechaInicio" &&
         key !== "observaciones" &&
+        key !== "nombre" &&
+        key !== "moneda" &&
         weeklyRateForm[key] &&
         parseFloat(weeklyRateForm[key]) > 0
     );
@@ -226,17 +258,16 @@ const CheeseFactoryApp = () => {
       return;
     }
 
-    const existingIndex = weeklyRates.findIndex(
-      (rate) => rate.fechaInicio === weeklyRateForm.fechaInicio
-    );
-
-    const fechaFin = new Date(weeklyRateForm.fechaInicio);
-    fechaFin.setDate(fechaFin.getDate() + 6);
+    if (!weeklyRateForm.nombre.trim()) {
+      alert("Por favor, ingrese un nombre para la tarifa");
+      return;
+    }
 
     const newWeeklyRate = {
-      id: Date.now(),
+      id: "tariff-" + Date.now(),
       fechaInicio: weeklyRateForm.fechaInicio,
-      fechaFin: fechaFin.toISOString().split("T")[0],
+      nombre: weeklyRateForm.nombre.trim(),
+      moneda: weeklyRateForm.moneda,
       vaca_fria: parseFloat(weeklyRateForm.vaca_fria) || 0,
       vaca_caliente: parseFloat(weeklyRateForm.vaca_caliente) || 0,
       bufala_fria: parseFloat(weeklyRateForm.bufala_fria) || 0,
@@ -245,21 +276,17 @@ const CheeseFactoryApp = () => {
       fechaCreacion: new Date().toISOString(),
     };
 
-    if (existingIndex >= 0) {
-      const updatedRates = [...weeklyRates];
-      updatedRates[existingIndex] = newWeeklyRate;
-      setWeeklyRates(updatedRates);
-      alert("Tarifa semanal actualizada");
-    } else {
-      const newRates = [...weeklyRates, newWeeklyRate].sort(
+    setWeeklyRates((prev) =>
+      [...prev, newWeeklyRate].sort(
         (a, b) => new Date(b.fechaInicio) - new Date(a.fechaInicio)
-      );
-      setWeeklyRates(newRates);
-      alert("Tarifa semanal registrada");
-    }
+      )
+    );
 
+    // Resetear formulario
     setWeeklyRateForm({
       fechaInicio: getStartOfWeek(new Date()).toISOString().split("T")[0],
+      nombre: "",
+      moneda: "USD",
       vaca_fria: "",
       vaca_caliente: "",
       bufala_fria: "",
@@ -268,6 +295,11 @@ const CheeseFactoryApp = () => {
     });
 
     setShowWeeklyRatesForm(false);
+    alert(
+      "Tarifa creada: " +
+        newWeeklyRate.nombre +
+        ". Ahora puedes asignarla a productores."
+    );
   };
 
   const handleInputChange = (field, value) => {
@@ -359,6 +391,89 @@ const CheeseFactoryApp = () => {
     }));
   };
 
+  // Función para manejar asignación de tarifas
+  const handleTariffAssignment = () => {
+    if (!assignmentForm.tariffId) {
+      alert("Por favor, seleccione una tarifa");
+      return;
+    }
+
+    if (assignmentForm.selectedProducers.length === 0) {
+      alert("Por favor, seleccione al menos un productor");
+      return;
+    }
+
+    // Verificar si ya existe una asignación para esta semana y estos productores
+    const existingAssignments = tariffAssignments.filter(
+      (assign) =>
+        assign.weekStart === assignmentForm.weekStart &&
+        assign.selectedProducers.some((p) =>
+          assignmentForm.selectedProducers.includes(p)
+        )
+    );
+
+    if (existingAssignments.length > 0) {
+      const confirmReplace = confirm(
+        "Algunos productores ya tienen tarifa asignada para esta semana. ¿Desea reemplazar?"
+      );
+      if (!confirmReplace) return;
+
+      // Remover asignaciones conflictivas
+      setTariffAssignments((prev) =>
+        prev.filter(
+          (assign) =>
+            !(
+              assign.weekStart === assignmentForm.weekStart &&
+              assign.selectedProducers.some((p) =>
+                assignmentForm.selectedProducers.includes(p)
+              )
+            )
+        )
+      );
+    }
+
+    const newAssignment = {
+      id: "assign-" + Date.now(),
+      weekStart: assignmentForm.weekStart,
+      tariffId: assignmentForm.tariffId,
+      selectedProducers: [...assignmentForm.selectedProducers],
+      fechaCreacion: new Date().toISOString(),
+    };
+
+    setTariffAssignments((prev) => [...prev, newAssignment]);
+
+    // Resetear formulario
+    setAssignmentForm({
+      weekStart: getStartOfWeek(new Date()).toISOString().split("T")[0],
+      tariffId: "",
+      selectedProducers: [],
+    });
+
+    setShowTariffAssignForm(false);
+
+    const tariffName =
+      weeklyRates.find((r) => r.id === newAssignment.tariffId)?.nombre || "";
+    alert(
+      `Tarifa "${tariffName}" asignada a ${newAssignment.selectedProducers.length} productores`
+    );
+  };
+
+  // Función para obtener productores sin tarifa asignada para una semana
+  const getUnassignedProducers = (weekStart) => {
+    const assignedProducers = tariffAssignments
+      .filter((assign) => assign.weekStart === weekStart)
+      .flatMap((assign) => assign.selectedProducers);
+
+    return producers.filter(
+      (producer) => !assignedProducers.includes(producer.id)
+    );
+  };
+
+  // Función para obtener tarifas disponibles para una semana
+  const getAvailableTariffs = (weekStart) => {
+    return weeklyRates.filter((rate) => rate.fechaInicio === weekStart);
+  };
+
   const setWeekInForm = (weekStart) => {
     setWeeklyRateForm((prev) => ({
       ...prev,
@@ -419,20 +534,25 @@ const CheeseFactoryApp = () => {
           bufala_caliente: 0,
           totalLitros: 0,
           totalPago: 0,
+          moneda: "USD",
+          tariffName: "Sin tarifa",
         };
       }
 
       const typeKey = delivery.origen + "_" + delivery.tipo;
-      const rateForDate = getRateForDate(
+      const rateInfo = getRateForDate(
         delivery.fecha,
         delivery.tipo,
-        delivery.origen
+        delivery.origen,
+        delivery.productorId
       );
-      const paymentAmount = delivery.cantidad * rateForDate;
+      const paymentAmount = delivery.cantidad * rateInfo.rate;
 
       producerTotals[key][typeKey] += delivery.cantidad;
       producerTotals[key].totalLitros += delivery.cantidad;
       producerTotals[key].totalPago += paymentAmount;
+      producerTotals[key].moneda = rateInfo.currency;
+      producerTotals[key].tariffName = rateInfo.tariffName;
     });
 
     return Object.values(producerTotals);
@@ -480,6 +600,15 @@ const CheeseFactoryApp = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <style jsx>{`
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
       <header className="bg-blue-600 text-white shadow-lg">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <h1 className="text-3xl font-bold">
@@ -553,24 +682,24 @@ const CheeseFactoryApp = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">
+            <div className="bg-white rounded-lg shadow-sm p-4 md:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <h2 className="text-lg md:text-xl font-semibold text-gray-900">
                   Gestión de Entregas
                 </h2>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button
                     onClick={() => setShowForm(true)}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 transition-colors text-sm md:text-base"
                   >
-                    <Plus className="w-5 h-5" />
+                    <Plus className="w-4 h-4 md:w-5 md:h-5" />
                     Nueva Entrega
                   </button>
                   <button
                     onClick={exportToCSV}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2 transition-colors"
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 transition-colors text-sm md:text-base"
                   >
-                    <Download className="w-5 h-5" />
+                    <Download className="w-4 h-4 md:w-5 md:h-5" />
                     Exportar CSV
                   </button>
                 </div>
@@ -847,196 +976,162 @@ const CheeseFactoryApp = () => {
 
         {activeTab === "pagos" && (
           <div className="space-y-6">
-            {/* Tarifas Semanales */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between mb-4">
+            {/* Gestión de Tarifas */}
+            <div className="bg-white rounded-lg shadow-sm p-4 md:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  Tarifas por Semana
+                  Gestión de Tarifas Híbridas
                 </h3>
-                <div className="flex gap-2">
-                  {!getActiveRateForWeek(selectedWeek) ? (
-                    <button
-                      onClick={() => {
-                        setWeekInForm(selectedWeek);
-                        setShowWeeklyRatesForm(true);
-                      }}
-                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Crear Tarifa para Esta Semana
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        const activeRate = getActiveRateForWeek(selectedWeek);
-                        setWeeklyRateForm({
-                          fechaInicio: activeRate.fechaInicio,
-                          vaca_fria: activeRate.vaca_fria.toString(),
-                          vaca_caliente: activeRate.vaca_caliente.toString(),
-                          bufala_fria: activeRate.bufala_fria.toString(),
-                          bufala_caliente:
-                            activeRate.bufala_caliente.toString(),
-                          observaciones: activeRate.observaciones,
-                        });
-                        setShowWeeklyRatesForm(true);
-                      }}
-                      className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 flex items-center gap-2 transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                      Editar Tarifa Actual
-                    </button>
-                  )}
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button
-                    onClick={() => {
-                      // Resetear formulario para nueva semana
-                      setWeeklyRateForm({
-                        fechaInicio: getStartOfWeek(new Date())
-                          .toISOString()
-                          .split("T")[0],
-                        vaca_fria: "",
-                        vaca_caliente: "",
-                        bufala_fria: "",
-                        bufala_caliente: "",
-                        observaciones: "",
-                      });
-                      setShowWeeklyRatesForm(true);
-                    }}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
+                    onClick={() => setShowWeeklyRatesForm(true)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 transition-colors text-sm"
                   >
-                    <Calendar className="w-4 h-4" />
-                    Planificar Nueva Semana
+                    <Plus className="w-4 h-4" />
+                    Crear Tarifa
+                  </button>
+                  <button
+                    onClick={() => setShowTariffAssignForm(true)}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 transition-colors text-sm"
+                  >
+                    <User className="w-4 h-4" />
+                    Asignar a Productores
                   </button>
                 </div>
               </div>
 
+              {/* Semana Seleccionada */}
               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium text-blue-900">
-                      Tarifa Activa - {formatWeekRange(selectedWeek)}
-                    </h4>
-                    {getActiveRateForWeek(selectedWeek) ? (
-                      <p className="text-sm text-blue-700">
-                        Usando tarifas específicas para esta semana
-                        {getActiveRateForWeek(selectedWeek).observaciones &&
-                          " - " +
-                            getActiveRateForWeek(selectedWeek).observaciones}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-orange-700">
-                        ⚠️ Sin tarifa definida - Los pagos serán €0.00
-                      </p>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    {getActiveRateForWeek(selectedWeek) ? (
-                      <div className="text-sm text-blue-800">
-                        <div>
-                          Vaca F: €
-                          {getActiveRateForWeek(selectedWeek).vaca_fria.toFixed(
-                            3
-                          )}
+                <h4 className="font-medium text-blue-900 mb-2">
+                  Semana Activa - {formatWeekRange(selectedWeek)}
+                </h4>
+
+                {/* Tarifas disponibles para esta semana */}
+                <div className="space-y-2">
+                  {getAvailableTariffs(selectedWeek.toISOString().split("T")[0])
+                    .length > 0 ? (
+                    getAvailableTariffs(
+                      selectedWeek.toISOString().split("T")[0]
+                    ).map((tariff) => {
+                      const assignedCount = tariffAssignments
+                        .filter(
+                          (assign) =>
+                            assign.weekStart ===
+                              selectedWeek.toISOString().split("T")[0] &&
+                            assign.tariffId === tariff.id
+                        )
+                        .reduce(
+                          (sum, assign) =>
+                            sum + assign.selectedProducers.length,
+                          0
+                        );
+
+                      return (
+                        <div
+                          key={tariff.id}
+                          className="flex items-center justify-between bg-white p-2 rounded border"
+                        >
+                          <div>
+                            <span className="font-medium text-blue-800">
+                              {tariff.nombre}
+                            </span>
+                            <span className="text-sm text-blue-600 ml-2">
+                              ({tariff.moneda})
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {assignedCount} productores asignados
+                          </div>
                         </div>
-                        <div>
-                          Búfala F: €
-                          {getActiveRateForWeek(
-                            selectedWeek
-                          ).bufala_fria.toFixed(3)}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-orange-800">
-                        <div>Vaca F: €0.000</div>
-                        <div>Búfala F: €0.000</div>
-                      </div>
-                    )}
-                  </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-orange-700">
+                      ⚠️ No hay tarifas creadas para esta semana
+                    </p>
+                  )}
+                </div>
+
+                {/* Productores sin asignar */}
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <p className="text-sm text-blue-700">
+                    Productores sin tarifa:{" "}
+                    <strong>
+                      {
+                        getUnassignedProducers(
+                          selectedWeek.toISOString().split("T")[0]
+                        ).length
+                      }
+                    </strong>
+                  </p>
                 </div>
               </div>
 
-              {weeklyRates.length > 0 ? (
+              {/* Historial de Tarifas */}
+              {(weeklyRates.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Semana
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Vaca Fría
+                        <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Nombre
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Vaca Caliente
+                        <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Moneda
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Búfala Fría
+                        <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                          Vaca F.
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Búfala Caliente
+                        <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                          Búfala F.
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Observaciones
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Acciones
+                        <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Productores
                         </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {weeklyRates.slice(0, 8).map((rate) => (
-                        <tr
-                          key={rate.id}
-                          className={
-                            "hover:bg-gray-50 " +
-                            (rate.fechaInicio ===
-                            selectedWeek.toISOString().split("T")[0]
-                              ? "bg-blue-25 border border-blue-200"
-                              : "")
-                          }
-                        >
-                          <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {formatWeekRange(new Date(rate.fechaInicio))}
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                            €{rate.vaca_fria.toFixed(3)}
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                            €{rate.vaca_caliente.toFixed(3)}
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                            €{rate.bufala_fria.toFixed(3)}
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                            €{rate.bufala_caliente.toFixed(3)}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-gray-600 max-w-xs truncate">
-                            {rate.observaciones || "-"}
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap text-sm">
-                            <button
-                              onClick={() => {
-                                setWeeklyRateForm({
-                                  fechaInicio: rate.fechaInicio,
-                                  vaca_fria: rate.vaca_fria.toString(),
-                                  vaca_caliente: rate.vaca_caliente.toString(),
-                                  bufala_fria: rate.bufala_fria.toString(),
-                                  bufala_caliente:
-                                    rate.bufala_caliente.toString(),
-                                  observaciones: rate.observaciones,
-                                });
-                                setShowWeeklyRatesForm(true);
-                              }}
-                              className="text-blue-600 hover:text-blue-800 font-medium"
-                            >
-                              Editar
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {weeklyRates.slice(0, 8).map((rate) => {
+                        const assignedCount = tariffAssignments
+                          .filter((assign) => assign.tariffId === rate.id)
+                          .reduce(
+                            (sum, assign) =>
+                              sum + assign.selectedProducers.length,
+                            0
+                          );
+
+                        return (
+                          <tr key={rate.id} className="hover:bg-gray-50">
+                            <td className="px-3 md:px-6 py-4 whitespace-nowrap text-xs md:text-sm font-medium text-gray-900">
+                              {formatWeekRange(new Date(rate.fechaInicio))}
+                            </td>
+                            <td className="px-3 md:px-6 py-4 whitespace-nowrap text-xs md:text-sm text-gray-900">
+                              {rate.nombre}
+                            </td>
+                            <td className="px-3 md:px-6 py-4 whitespace-nowrap text-xs md:text-sm">
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                {rate.moneda}
+                              </span>
+                            </td>
+                            <td className="hidden sm:table-cell px-3 md:px-6 py-4 whitespace-nowrap text-xs md:text-sm text-gray-900">
+                              {rate.vaca_fria.toFixed(3)}
+                            </td>
+                            <td className="hidden sm:table-cell px-3 md:px-6 py-4 whitespace-nowrap text-xs md:text-sm text-gray-900">
+                              {rate.bufala_fria.toFixed(3)}
+                            </td>
+                            <td className="px-3 md:px-6 py-4 whitespace-nowrap text-xs md:text-sm text-gray-600">
+                              {assignedCount} asignados
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
-              ) : (
+              )) || (
                 <div className="text-center py-8 text-gray-500">
                   <p>No hay tarifas semanales registradas</p>
                   <p className="text-sm mt-1">
@@ -1355,11 +1450,365 @@ const CheeseFactoryApp = () => {
         </div>
       )}
 
+      {/* Modal para Crear Tarifas */}
+      {showWeeklyRatesForm && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 p-4">
+          <div className="relative top-4 md:top-20 mx-auto border w-full max-w-2xl shadow-lg rounded-md bg-white">
+            <div className="p-4 md:p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Crear Nueva Tarifa
+                </h3>
+                <button
+                  onClick={() => setShowWeeklyRatesForm(false)}
+                  className="text-gray-400 hover:text-gray-600 p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Calendar className="w-4 h-4 inline mr-1" />
+                      Semana de Aplicación
+                    </label>
+                    <input
+                      type="date"
+                      value={weeklyRateForm.fechaInicio}
+                      onChange={(e) => {
+                        const selectedDate = new Date(e.target.value);
+                        const weekStart = getStartOfWeek(selectedDate);
+                        handleWeeklyRateChange(
+                          "fechaInicio",
+                          weekStart.toISOString().split("T")[0]
+                        );
+                      }}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Semana:{" "}
+                      {formatWeekRange(new Date(weeklyRateForm.fechaInicio))}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nombre de la Tarifa *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={weeklyRateForm.nombre}
+                      onChange={(e) =>
+                        handleWeeklyRateChange("nombre", e.target.value)
+                      }
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Ej: Tarifa Premium, Tarifa Estándar"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Moneda *
+                  </label>
+                  <select
+                    value={weeklyRateForm.moneda}
+                    onChange={(e) =>
+                      handleWeeklyRateChange("moneda", e.target.value)
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="USD">Dólares (USD)</option>
+                    <option value="BS">Bolívares (Bs.)</option>
+                    <option value="EUR">Euros (EUR)</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Vaca Fría
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={weeklyRateForm.vaca_fria}
+                      onChange={(e) =>
+                        handleWeeklyRateChange("vaca_fria", e.target.value)
+                      }
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Vaca Caliente
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={weeklyRateForm.vaca_caliente}
+                      onChange={(e) =>
+                        handleWeeklyRateChange("vaca_caliente", e.target.value)
+                      }
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Búfala Fría
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={weeklyRateForm.bufala_fria}
+                      onChange={(e) =>
+                        handleWeeklyRateChange("bufala_fria", e.target.value)
+                      }
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Búfala Caliente
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={weeklyRateForm.bufala_caliente}
+                      onChange={(e) =>
+                        handleWeeklyRateChange(
+                          "bufala_caliente",
+                          e.target.value
+                        )
+                      }
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.000"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Observaciones
+                  </label>
+                  <textarea
+                    value={weeklyRateForm.observaciones}
+                    onChange={(e) =>
+                      handleWeeklyRateChange("observaciones", e.target.value)
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows="3"
+                    placeholder="Condiciones especiales, notas, etc."
+                  />
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-sm text-blue-800">
+                    <strong>💡 Información:</strong> Después de crear la tarifa,
+                    deberás asignarla a los productores específicos. Una misma
+                    semana puede tener múltiples tarifas con diferentes monedas.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleWeeklyRateSubmit}
+                    className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
+                  >
+                    Crear Tarifa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowWeeklyRatesForm(false)}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Asignar Tarifas a Productores */}
+      {showTariffAssignForm && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 p-4">
+          <div className="relative top-4 md:top-20 mx-auto border w-full max-w-2xl shadow-lg rounded-md bg-white">
+            <div className="p-4 md:p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Asignar Tarifa a Productores
+                </h3>
+                <button
+                  onClick={() => setShowTariffAssignForm(false)}
+                  className="text-gray-400 hover:text-gray-600 p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Semana
+                  </label>
+                  <input
+                    type="date"
+                    value={assignmentForm.weekStart}
+                    onChange={(e) => {
+                      const selectedDate = new Date(e.target.value);
+                      const weekStart = getStartOfWeek(selectedDate);
+                      setAssignmentForm((prev) => ({
+                        ...prev,
+                        weekStart: weekStart.toISOString().split("T")[0],
+                      }));
+                    }}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Semana:{" "}
+                    {formatWeekRange(new Date(assignmentForm.weekStart))}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Seleccionar Tarifa
+                  </label>
+                  <select
+                    value={assignmentForm.tariffId}
+                    onChange={(e) =>
+                      setAssignmentForm((prev) => ({
+                        ...prev,
+                        tariffId: e.target.value,
+                      }))
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Seleccione una tarifa...</option>
+                    {getAvailableTariffs(assignmentForm.weekStart).map(
+                      (tariff) => (
+                        <option key={tariff.id} value={tariff.id}>
+                          {tariff.nombre} ({tariff.moneda})
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Productores (
+                    {getUnassignedProducers(assignmentForm.weekStart).length}{" "}
+                    disponibles)
+                  </label>
+                  <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2 space-y-2">
+                    {getUnassignedProducers(assignmentForm.weekStart).map(
+                      (producer) => (
+                        <label
+                          key={producer.id}
+                          className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={assignmentForm.selectedProducers.includes(
+                              producer.id
+                            )}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setAssignmentForm((prev) => ({
+                                  ...prev,
+                                  selectedProducers: [
+                                    ...prev.selectedProducers,
+                                    producer.id,
+                                  ],
+                                }));
+                              } else {
+                                setAssignmentForm((prev) => ({
+                                  ...prev,
+                                  selectedProducers:
+                                    prev.selectedProducers.filter(
+                                      (id) => id !== producer.id
+                                    ),
+                                }));
+                              }
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">
+                              {producer.nombre}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              RIF: {producer.rif}
+                            </div>
+                          </div>
+                        </label>
+                      )
+                    )}
+                  </div>
+
+                  {getUnassignedProducers(assignmentForm.weekStart).length ===
+                    0 && (
+                    <p className="text-sm text-gray-500 mt-2">
+                      Todos los productores ya tienen tarifa asignada para esta
+                      semana.
+                    </p>
+                  )}
+                </div>
+
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <p className="text-sm text-green-800">
+                    <strong>📋 Resumen:</strong> Se asignará la tarifa
+                    seleccionada a {assignmentForm.selectedProducers.length}{" "}
+                    productores para la semana del{" "}
+                    {formatWeekRange(new Date(assignmentForm.weekStart))}.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleTariffAssignment}
+                    disabled={
+                      !assignmentForm.tariffId ||
+                      assignmentForm.selectedProducers.length === 0
+                    }
+                    className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  >
+                    Asignar Tarifa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTariffAssignForm(false)}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal para Nuevo Productor */}
       {showNewProducerForm && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
-            <div className="mt-3">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 p-4">
+          <div className="relative top-4 md:top-20 mx-auto border w-full max-w-md shadow-lg rounded-md bg-white">
+            <div className="p-4 md:p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">
                   Registrar Nuevo Productor
@@ -1369,7 +1818,7 @@ const CheeseFactoryApp = () => {
                     setShowNewProducerForm(false);
                     setShowForm(true);
                   }}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 p-1"
                 >
                   ✕
                 </button>
